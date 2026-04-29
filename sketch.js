@@ -10,6 +10,7 @@ let persistentLayer;
 let lockedBrushCount = 0;
 let permissionGranted = false;
 let sensorButton;
+let sensorStatus = "";
 
 const warmLockPalette = [
   [255, 0, 0], // rosso acceso
@@ -25,31 +26,28 @@ const warmLockPalette = [
 let NUM_BRUSHES = 20;
 
 function requestAccess() {
-  let permissionRequests = [];
-
   if (
     typeof DeviceOrientationEvent !== "undefined" &&
     typeof DeviceOrientationEvent.requestPermission === "function"
   ) {
-    permissionRequests.push(DeviceOrientationEvent.requestPermission());
+    DeviceOrientationEvent.requestPermission()
+      .then((response) => {
+        permissionGranted = response === "granted";
+        sensorStatus = permissionGranted ? "" : "Sensor access denied in Safari";
+
+        if (permissionGranted && sensorButton) {
+          sensorButton.remove();
+          sensorButton = null;
+        }
+      })
+      .catch((error) => {
+        sensorStatus = "Sensor request failed";
+        console.error(error);
+      });
+    return;
   }
 
-  if (
-    typeof DeviceMotionEvent !== "undefined" &&
-    typeof DeviceMotionEvent.requestPermission === "function"
-  ) {
-    permissionRequests.push(DeviceMotionEvent.requestPermission());
-  }
-
-  Promise.all(permissionRequests)
-    .then((responses) => {
-      permissionGranted = responses.every((response) => response === "granted");
-      if (permissionGranted && sensorButton) {
-        sensorButton.remove();
-        sensorButton = null;
-      }
-    })
-    .catch(console.error);
+  permissionGranted = true;
 }
 
 function setup() {
@@ -255,6 +253,7 @@ function setup() {
         sensorButton.style("font-size", "24px");
         sensorButton.center();
         sensorButton.mousePressed(requestAccess);
+        sensorButton.elt.addEventListener("touchend", requestAccess);
       })
       .then((permissionState) => {
         if (permissionState === "granted") {
@@ -281,6 +280,12 @@ function draw() {
   }
 
   if (!permissionGranted) {
+    if (sensorStatus) {
+      fill(40);
+      textAlign(CENTER, CENTER);
+      textSize(18);
+      text(sensorStatus, width / 2, height / 2 + 50);
+    }
     Engine.update(engine);
     return;
   }
