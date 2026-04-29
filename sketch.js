@@ -8,6 +8,8 @@ let brush;
 let brushes = [];
 let persistentLayer;
 let lockedBrushCount = 0;
+let permissionGranted = false;
+let sensorButton;
 
 const warmLockPalette = [
   [255, 0, 0], // rosso acceso
@@ -21,6 +23,34 @@ const warmLockPalette = [
 ];
 
 let NUM_BRUSHES = 20;
+
+function requestAccess() {
+  let permissionRequests = [];
+
+  if (
+    typeof DeviceOrientationEvent !== "undefined" &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    permissionRequests.push(DeviceOrientationEvent.requestPermission());
+  }
+
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
+    permissionRequests.push(DeviceMotionEvent.requestPermission());
+  }
+
+  Promise.all(permissionRequests)
+    .then((responses) => {
+      permissionGranted = responses.every((response) => response === "granted");
+      if (permissionGranted && sensorButton) {
+        sensorButton.remove();
+        sensorButton = null;
+      }
+    })
+    .catch(console.error);
+}
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -215,39 +245,25 @@ function setup() {
     return false;
   };
 
-  let button = createButton("Request Sensor Access");
-
-  button.position(10, 10);
-
-  button.mousePressed(() => {
-    if (
-      typeof DeviceOrientationEvent !== "undefined" &&
-      typeof DeviceOrientationEvent.requestPermission === "function"
-    ) {
-      DeviceOrientationEvent.requestPermission()
-        .then((permissionState) => {
-          if (permissionState === "granted") {
-            console.log("Orientation permission granted");
-          }
-        })
-        .catch(console.error);
-    }
-
-    if (
-      typeof DeviceMotionEvent !== "undefined" &&
-      typeof DeviceMotionEvent.requestPermission === "function"
-    ) {
-      DeviceMotionEvent.requestPermission()
-        .then((permissionState) => {
-          if (permissionState === "granted") {
-            console.log("Motion permission granted");
-          }
-        })
-        .catch(console.error);
-    }
-
-    button.remove();
-  });
+  if (
+    typeof DeviceOrientationEvent !== "undefined" &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    DeviceOrientationEvent.requestPermission()
+      .catch(() => {
+        sensorButton = createButton("click to allow access to sensors");
+        sensorButton.style("font-size", "24px");
+        sensorButton.center();
+        sensorButton.mousePressed(requestAccess);
+      })
+      .then((permissionState) => {
+        if (permissionState === "granted") {
+          permissionGranted = true;
+        }
+      });
+  } else {
+    permissionGranted = true;
+  }
 }
 
 function draw() {
@@ -262,6 +278,11 @@ function draw() {
 
   for (let i = 0; i < brushes.length; i++) {
     brushes[i].draw();
+  }
+
+  if (!permissionGranted) {
+    Engine.update(engine);
+    return;
   }
 
   console.log(rotationX, rotationY, rotationZ);
