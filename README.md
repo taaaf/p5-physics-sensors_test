@@ -1,99 +1,102 @@
-# `sensor-permissions.js` — plug-and-play (Copilot-friendly)
+# `sensor-permissions.js`
 
-Goal: drop **one JS file**, add **two script tags in the right order**, and optionally paste a **tiny `draw()` branch** — no sensor-permission boilerplate inside `setup()`.
+Reusable helper to request **motion/orientation sensor permissions** in browsers.
 
-## Files
+On **iOS Safari**, motion/orientation access is blocked until you request permission from a **user gesture** (tap). This helper handles that by optionally showing a tap button and retrying the request.
 
-Copy into your repo (same folder works):
+## How to include it (script tag)
 
-- **`sensor-permissions.js`** — this readme’s companion script.
-
-## Include in HTML (**order matters for p5 global mode**)
-
-1. Leave your usual libs + sketch scripts as they are **except**:
-2. Add **`sensor-permissions.js` immediately after your sketch** so `window.setup` already exists when the helper runs. p5 still starts later, so the wrapper is in place before `setup()` is called.
+Load `sensor-permissions.js` before the script that uses sensors:
 
 ```html
-<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.8/p5.min.js"></script>
-<script src="sketch.js"></script>
 <script src="sensor-permissions.js"></script>
+<script src="your-sketch-or-app.js"></script>
 ```
 
-**Do not load `sensor-permissions.js` *before* the script that defines `setup`** — otherwise there is nothing to wrap.
+## What you must do vs what is optional
 
-## Sketch: what you actually need (**no duplicate variables**)
+- **Required for iOS Safari**: call `SensorPermissions.ensureSensorPermission(...)` **once** when your app starts (e.g. p5 `setup()`, or `DOMContentLoaded`). Do **not** put this in `draw()` or any per-frame loop — it will spam requests and can behave badly.
+- **Optional**: any variables you use to remember permission and show messages. A common p5 pattern is two globals plus a short branch in `draw()` if you read `rotationX` / `rotationY` only after permission is granted.
 
-Permission state lives on **`SensorPermissions`** — **you do not** need `permissionGranted`, `sensorStatus`, or anything in **`setup()`** for the default p5-global flow.
+## Minimal example (no extra state)
 
-Paste this pattern wherever you gate sensor logic (e.g. **`draw()`**):
+If you do not need to block any code until permission is ready:
 
-```javascript
-if (!SensorPermissions.granted) {
-  const msg = SensorPermissions.statusMessage;
-  if (msg) {
+```js
+SensorPermissions.ensureSensorPermission({
+  buttonText: "Tap to allow access to sensors",
+  preferP5Button: true,
+});
+```
+
+## Recommended p5 example (state + one call in `setup()`)
+
+**1. At the top of your sketch** (or wherever you keep globals):
+
+```js
+let permissionGranted = false;
+let sensorStatus = "";
+```
+
+**2. Inside `setup()`** — call **once** (same idea as the end of your `setup()`, not inside `draw()`):
+
+```js
+SensorPermissions.ensureSensorPermission({
+  buttonText: "Tap to allow access to sensors",
+  preferP5Button: true,
+  onChange: (granted, result) => {
+    permissionGranted = granted;
+    if (granted) {
+      sensorStatus = "";
+      return;
+    }
+    if (result && result.state === "denied") {
+      sensorStatus = "Sensor access denied in Safari";
+    } else if (result && result.state === "error") {
+      sensorStatus = "Tap to allow sensor access";
+    } else {
+      sensorStatus = "Sensor permission needed";
+    }
+  },
+});
+```
+
+**3. In `draw()`** (optional but useful): skip device-tilt logic until `permissionGranted` is true, and optionally show `sensorStatus`:
+
+```js
+if (!permissionGranted) {
+  if (sensorStatus) {
     fill(40);
     textAlign(CENTER, CENTER);
     textSize(18);
-    text(msg, width / 2, height / 2 + 50);
+    text(sensorStatus, width / 2, height / 2 + 50);
   }
-  return;
+  return; // or continue without using rotationX / rotationY
 }
 
-// Sensor usage (example)
-// accelerationX … or rotationX / rotationY …
+// use rotationX, rotationY, etc. only after permission is granted
 ```
 
-- **`SensorPermissions.granted`** — `true` once motion/orientation is allowed (or not required on desktop/Android).
-- **`SensorPermissions.statusMessage`** — short string for overlays while waiting or after denial/error; empty when granted.
+If you still want physics or other drawing while waiting for permission (like Matter.js stepping every frame), **do not** `return` from all of `draw()` — only skip the blocks that read device rotation until `permissionGranted` is true.
 
-Nothing else is **required** in the sketch for permissions.
+## What it does
 
-## What runs automatically (**default**)
+- **Non‑iOS browsers**: permission APIs don’t exist, so it immediately reports `granted: true`.
+- **iOS Safari**:
+  - it tries once (may fail without a user gesture),
+  - then it shows a button,
+  - on tap it retries and removes the button once granted.
 
-By default (`SENSOR_PERMISSIONS_AUTO_BOOTSTRAP` **not** set to `false`):
+## API (quick)
 
-The script wraps **`setup()`** once, then after **your** `setup()` body finishes it starts permission flow (shows the tap button on iOS when needed). You **do not** call `ensureSensorPermission` in `setup()` for this path.
-
-### Optional globals (defaults are fine)
-
-Set **before** `sensor-permissions.js` loads (e.g. in HTML right above the `<script src="sensor-permissions.js">` tag):
-
-```html
-<script>
-  window.SENSOR_PERMISSIONS_OPTIONS = {
-    buttonText: "Tap to allow access to sensors",
-    preferP5Button: true,
-  };
-</script>
-<script src="sensor-permissions.js"></script>
-```
-
-- **`preferP5Button`** — try `createButton()` when p5 exists; falls back to a DOM button if not.
-
-Disable auto-bootstrap (p5 instance mode, or manual control):
-
-```html
-<script>
-  window.SENSOR_PERMISSIONS_AUTO_BOOTSTRAP = false;
-</script>
-<script src="sensor-permissions.js"></script>
-```
-
-Then in **`setup()`** (once):
-
-```javascript
-SensorPermissions.ensureSensorPermission();
-```
-
-## Manual / advanced API
-
-- **`SensorPermissions.needsSensorPermission()`** → `boolean`
-- **`SensorPermissions.requestSensorPermissionOnce()`** → `Promise<{ granted, state, error? }>` (also refreshes **`granted` / `statusMessage`**)
-- **`SensorPermissions.ensureSensorPermission(options?)`** — same as before: runs the full “try + button on iOS” flow; safe to call once; repeated calls return a snapshot (flow is not started twice).
-- **`SensorPermissions.lastResult`** — last permission result object (debugging).
-- **`SensorPermissions.bootstrapAfterUserSetup()`** — used internally after `setup()`; you normally do not call it.
+- `SensorPermissions.needsSensorPermission()` → `boolean`
+- `SensorPermissions.requestSensorPermissionOnce()` → `Promise<{ granted, state, error? }>`
+- `SensorPermissions.ensureSensorPermission(options)` → `Promise<{ granted, state, error? }>`
+  - `options.buttonText` (string)
+  - `options.preferP5Button` (boolean, default `true`)
+  - `options.onChange(granted, result)` (callback)
 
 ## Notes
 
-- On **iOS Safari**, permission must be triggered from a **user tap**; the script shows a button when needed.
-- Serve over **HTTPS** for reliable device sensors on phones.
+- **HTTPS** (or `localhost`) improves mobile sensor reliability; avoid `file://` when testing.
+- On iOS, permissions only work after a **tap**; calling in `draw()` won’t help.

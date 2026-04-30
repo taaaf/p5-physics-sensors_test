@@ -1,35 +1,7 @@
-// Motion/orientation permission helpers (iOS Safari requires a user gesture).
+// Sensor permission helpers (iOS Safari requires a user gesture).
 // Exposes `window.SensorPermissions`.
-// In p5 global mode: set `window.SENSOR_PERMISSIONS_AUTO_BOOTSTRAP = false` before this
-// script to disable auto-hook; then call `SensorPermissions.ensureSensorPermission()`.
 (function () {
   "use strict";
-
-  var _granted = false;
-  var _statusMessage = "";
-  var _lastResult = null;
-  var _ensurePromise = null;
-  var _flowStartedOnce = false;
-
-  function applyState(granted, result) {
-    _granted = !!granted;
-    _lastResult = result || null;
-    if (_granted) {
-      _statusMessage = "";
-      return;
-    }
-    if (result && result.state === "denied") _statusMessage = "Sensor access denied in Safari";
-    else if (result && result.state === "error") _statusMessage = "Tap to allow sensor access";
-    else if (result && result.state === "not_needed") _statusMessage = "";
-    else _statusMessage = "Sensor permission needed";
-  }
-
-  function getOptionsFromWindow() {
-    var w = typeof window !== "undefined" ? window : {};
-    return w.SENSOR_PERMISSIONS_OPTIONS && typeof w.SENSOR_PERMISSIONS_OPTIONS === "object"
-      ? w.SENSOR_PERMISSIONS_OPTIONS
-      : {};
-  }
 
   function hasPermissionAPI(EventCtor) {
     return typeof EventCtor !== "undefined" && typeof EventCtor.requestPermission === "function";
@@ -40,14 +12,11 @@
   }
 
   async function requestSensorPermissionOnce() {
-    if (!needsSensorPermission()) {
-      var ok = { granted: true, state: "not_needed" };
-      applyState(true, ok);
-      return ok;
-    }
+    // If no permission API exists, assume permission is implicitly granted (Android/desktop).
+    if (!needsSensorPermission()) return { granted: true, state: "not_needed" };
 
     try {
-      var requests = [];
+      const requests = [];
 
       if (hasPermissionAPI(window.DeviceOrientationEvent)) {
         requests.push(window.DeviceOrientationEvent.requestPermission());
@@ -56,22 +25,17 @@
         requests.push(window.DeviceMotionEvent.requestPermission());
       }
 
-      var results = await Promise.all(requests);
-      var granted = results.length === 0 ? true : results.every(function (r) {
-        return r === "granted";
-      });
-      var result = { granted: granted, state: granted ? "granted" : "denied" };
-      applyState(granted, result);
-      return result;
+      const results = await Promise.all(requests);
+      const granted = results.length === 0 ? true : results.every((r) => r === "granted");
+      return { granted, state: granted ? "granted" : "denied" };
     } catch (error) {
-      var errResult = { granted: false, state: "error", error: error };
-      applyState(false, errResult);
-      return errResult;
+      // Common case on iOS: calling without a user gesture rejects.
+      return { granted: false, state: "error", error };
     }
   }
 
   function defaultDeniedMessage(result) {
-    if (result && result.state === "denied") return "Sensor access denied in Safari";
+    if (result.state === "denied") return "Sensor access denied in Safari";
     return "Tap to allow sensor access";
   }
 
@@ -86,7 +50,8 @@
   }
 
   function createP5Button(label, onPress) {
-    var btn = window.createButton(label);
+    // p5's createButton exists only after p5 is loaded; in sketches it will exist in setup().
+    const btn = window.createButton(label);
     btn.style("font-size", "24px");
     btn.style("padding", "12px 16px");
     btn.style("border-radius", "12px");
@@ -95,7 +60,8 @@
     btn.style("color", "#111");
     btn.center();
     btn.mousePressed(onPress);
-    btn.elt.addEventListener("touchend", function (e) {
+    // iOS sometimes prefers touchend over click.
+    btn.elt.addEventListener("touchend", (e) => {
       e.preventDefault();
       onPress();
     });
@@ -103,7 +69,7 @@
   }
 
   function createDomButton(label, onPress) {
-    var btn = document.createElement("button");
+    const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = label;
     btn.style.position = "fixed";
@@ -121,7 +87,7 @@
     btn.addEventListener("click", onPress, { passive: false });
     btn.addEventListener(
       "touchend",
-      function (e) {
+      (e) => {
         e.preventDefault();
         onPress();
       },
@@ -131,122 +97,50 @@
     return btn;
   }
 
-  function snapshotResult() {
-    return _lastResult
-      ? { granted: !!_lastResult.granted, state: _lastResult.state, error: _lastResult.error }
-      : { granted: _granted, state: _granted ? "not_needed" : "pending" };
-  }
+  /**
+   * Ensures sensors are usable by requesting permissions where required.
+   * On iOS Safari, permission must be requested from a user gesture, so this
+   * will create a button when needed.
+   *
+   * @param {object} options
+   * @param {(granted: boolean, result: any) => void} [options.onChange]
+   * @param {string} [options.buttonText]
+   * @param {boolean} [options.preferP5Button]
+   * @returns {Promise<{granted: boolean, state: string, error?: any}>}
+   */
+  async function ensureSensorPermission(options) {
+    const opts = options || {};
+    const onChange = typeof opts.onChange === "function" ? opts.onChange : null;
+    const buttonText = typeof opts.buttonText === "string" ? opts.buttonText : "Tap to enable sensors";
+    const preferP5Button = opts.preferP5Button !== false; // default true
 
-  async function ensureSensorPermissionImpl(options) {
-    var opts = options || {};
-    var winOpts = getOptionsFromWindow();
-    var onChange = typeof opts.onChange === "function" ? opts.onChange : null;
-    var buttonText =
-      typeof opts.buttonText === "string"
-        ? opts.buttonText
-        : typeof winOpts.buttonText === "string"
-          ? winOpts.buttonText
-          : "Tap to allow access to sensors";
-    var preferP5Button =
-      opts.preferP5Button !== undefined
-        ? opts.preferP5Button !== false
-        : winOpts.preferP5Button !== false;
+    let button = null;
 
-    // Sync path: no permission API — avoid `await`-microtask so first `draw()` sees `granted === true`.
-    if (!needsSensorPermission()) {
-      var instant = { granted: true, state: "not_needed" };
-      applyState(true, instant);
-      if (onChange) onChange(true, instant);
-      return instant;
-    }
-
-    var button = null;
-
-    var tryRequest = async function () {
-      var result = await requestSensorPermissionOnce();
+    const tryRequest = async () => {
+      const result = await requestSensorPermissionOnce();
       if (onChange) onChange(!!result.granted, result);
       if (result.granted) removeExistingButton(button);
       return result;
     };
 
-    var first = await tryRequest();
+    // Try immediately first (works on most platforms; on iOS it often rejects without a gesture).
+    const first = await tryRequest();
     if (first.granted) return first;
 
+    // If permission is required, show a button and retry on user gesture.
     if (!needsSensorPermission()) return first;
 
-    var label = buttonText || defaultDeniedMessage(first);
-    var useP5 = preferP5Button && typeof window.createButton === "function";
+    const label = buttonText || defaultDeniedMessage(first);
+    const useP5 = preferP5Button && typeof window.createButton === "function";
     button = useP5 ? createP5Button(label, tryRequest) : createDomButton(label, tryRequest);
 
     return first;
   }
 
-  /**
-   * Repeated calls resolve to the latest snapshot — the flow runs once until permission is resolved.
-   * State is exposed on `SensorPermissions.granted` / `SensorPermissions.statusMessage` after each tap/attempt.
-   */
-  function ensureSensorPermission(options) {
-    if (_flowStartedOnce) return Promise.resolve(snapshotResult());
-    _flowStartedOnce = true;
-    if (!_ensurePromise) {
-      _ensurePromise = ensureSensorPermissionImpl(options).then(function (r) {
-        return r;
-      });
-    }
-    return _ensurePromise;
-  }
-
-  function bootstrapAfterUserSetup() {
-    var winOpts = getOptionsFromWindow();
-    return ensureSensorPermission({
-      buttonText: winOpts.buttonText,
-      preferP5Button: winOpts.preferP5Button,
-    });
-  }
-
-  /** Run after sketch.js assigns `setup` — wrap before p5 calls it on DOM/load. */
-  function installP5GlobalAutoBootstrap() {
-    var userSetup = window.setup;
-    if (typeof userSetup !== "function" || userSetup.__sensorPermissionsWrapped) return;
-
-    function wrappedSetup() {
-      var ret = userSetup.apply(this, arguments);
-      bootstrapAfterUserSetup();
-      return ret;
-    }
-    wrappedSetup.__sensorPermissionsWrapped = true;
-    window.setup = wrappedSetup;
-  }
-
-  var api = {
-    needsSensorPermission: needsSensorPermission,
-    requestSensorPermissionOnce: requestSensorPermissionOnce,
-    ensureSensorPermission: ensureSensorPermission,
-    bootstrapAfterUserSetup: bootstrapAfterUserSetup,
+  window.SensorPermissions = {
+    needsSensorPermission,
+    requestSensorPermissionOnce,
+    ensureSensorPermission,
   };
-
-  Object.defineProperty(api, "granted", {
-    get: function () {
-      return _granted;
-    },
-    enumerable: true,
-  });
-  Object.defineProperty(api, "statusMessage", {
-    get: function () {
-      return _statusMessage;
-    },
-    enumerable: true,
-  });
-  Object.defineProperty(api, "lastResult", {
-    get: function () {
-      return _lastResult;
-    },
-    enumerable: true,
-  });
-
-  window.SensorPermissions = api;
-
-  if (typeof window !== "undefined" && window.SENSOR_PERMISSIONS_AUTO_BOOTSTRAP !== false) {
-    installP5GlobalAutoBootstrap();
-  }
 })();
+
