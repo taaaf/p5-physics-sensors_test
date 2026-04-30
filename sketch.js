@@ -9,7 +9,6 @@ let brushes = [];
 let persistentLayer;
 let lockedBrushCount = 0;
 let permissionGranted = false;
-let sensorButton;
 let sensorStatus = "";
 
 const warmLockPalette = [
@@ -24,31 +23,6 @@ const warmLockPalette = [
 ];
 
 let NUM_BRUSHES = 20;
-
-function requestAccess() {
-  if (
-    typeof DeviceOrientationEvent !== "undefined" &&
-    typeof DeviceOrientationEvent.requestPermission === "function"
-  ) {
-    DeviceOrientationEvent.requestPermission()
-      .then((response) => {
-        permissionGranted = response === "granted";
-        sensorStatus = permissionGranted ? "" : "Sensor access denied in Safari";
-
-        if (permissionGranted && sensorButton) {
-          sensorButton.remove();
-          sensorButton = null;
-        }
-      })
-      .catch((error) => {
-        sensorStatus = "Sensor request failed";
-        console.error(error);
-      });
-    return;
-  }
-
-  permissionGranted = true;
-}
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -243,26 +217,23 @@ function setup() {
     return false;
   };
 
-  if (
-    typeof DeviceOrientationEvent !== "undefined" &&
-    typeof DeviceOrientationEvent.requestPermission === "function"
-  ) {
-    DeviceOrientationEvent.requestPermission()
-      .catch(() => {
-        sensorButton = createButton("click to allow access to sensors");
-        sensorButton.style("font-size", "24px");
-        sensorButton.center();
-        sensorButton.mousePressed(requestAccess);
-        sensorButton.elt.addEventListener("touchend", requestAccess);
-      })
-      .then((permissionState) => {
-        if (permissionState === "granted") {
-          permissionGranted = true;
-        }
-      });
-  } else {
-    permissionGranted = true;
-  }
+  // Sensor permissions (required on iOS Safari, gesture-gated)
+  SensorPermissions.ensureSensorPermission({
+    buttonText: "Tap to allow access to sensors",
+    preferP5Button: true,
+    onChange: (granted, result) => {
+      permissionGranted = granted;
+      if (granted) {
+        sensorStatus = "";
+        return;
+      }
+
+      // Keep the message short; the helper shows a button if needed.
+      if (result && result.state === "denied") sensorStatus = "Sensor access denied in Safari";
+      else if (result && result.state === "error") sensorStatus = "Tap to allow sensor access";
+      else sensorStatus = "Sensor permission needed";
+    },
+  });
 }
 
 function draw() {
