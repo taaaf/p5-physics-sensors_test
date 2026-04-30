@@ -214,11 +214,6 @@ function setup() {
     lockBrushAtPoint(mouseX, mouseY);
     return false;
   };
-
-  // Sensor permissions (required on iOS Safari, gesture-gated)
-  SensorPermissions.ensureSensorPermissionP5({
-    buttonText: "Tap to allow access to sensors",
-  });
 }
 
 function draw() {
@@ -235,8 +230,14 @@ function draw() {
     brushes[i].draw();
   }
 
-  if (!SensorPermissions.state.granted) {
-    SensorPermissions.renderStatusP5();
+  if (!SensorPermissions.granted) {
+    const msg = SensorPermissions.statusMessage;
+    if (msg) {
+      fill(40);
+      textAlign(CENTER, CENTER);
+      textSize(18);
+      text(msg, width / 2, height / 2 + 50);
+    }
     Engine.update(engine);
     return;
   }
