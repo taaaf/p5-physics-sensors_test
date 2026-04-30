@@ -1,50 +1,71 @@
-# `sensor-permissions.js`
+# `sensor-permissions.js` (drop-in)
 
-Reusable helper to request **motion/orientation sensor permissions** in browsers.
+Drop this file into any project to handle **motion/orientation sensor permissions**, especially **iOS Safari** (which requires a user gesture/tap).
 
-On **iOS Safari**, motion/orientation access is blocked until you request permission from a **user gesture** (tap). This helper handles that by optionally showing a tap button and retrying the request.
+## Install (copy/paste)
 
-## How to include it (script tag)
+### 1) Copy the file
 
-Load `sensor-permissions.js` before the script that uses sensors:
+Copy `sensor-permissions.js` into your project (any folder is fine).
+
+### 2) Include it BEFORE your app code
 
 ```html
 <script src="sensor-permissions.js"></script>
-<script src="your-sketch-or-app.js"></script>
+<script src="your-app.js"></script>
 ```
 
-## How to use it (recommended)
+## p5.js (plug-and-play)
 
-Call `SensorPermissions.ensureSensorPermission(...)` once from a place that runs on startup (e.g. `setup()` in p5):
+### Add this in `setup()`
 
 ```js
-SensorPermissions.ensureSensorPermission({
+SensorPermissions.ensureSensorPermissionP5({
   buttonText: "Tap to allow access to sensors",
-  preferP5Button: true,
-  onChange: (granted, result) => {
-    permissionGranted = granted;
-    sensorStatus = granted ? "" : "Sensor permission needed";
-  },
 });
 ```
 
-## What it does
+### Add this guard in `draw()` (before using sensors)
 
-- **Non‑iOS browsers**: permission APIs don’t exist, so it immediately reports `granted: true`.
-- **iOS Safari**:
-  - it tries once (may fail without a user gesture),
-  - then it shows a button,
-  - on tap it retries and removes the button once granted.
+```js
+if (!SensorPermissions.state.granted) {
+  SensorPermissions.renderStatusP5(); // optional status text
+  return;
+}
 
-## API (quick)
+// Now it's safe to use rotationX / rotationY / rotationZ (and similar)
+```
 
+### Variables you need to add to your sketch
+
+None.
+
+Read permission state via:
+
+- `SensorPermissions.state.granted` (boolean)
+- `SensorPermissions.state.status` (string)
+
+## Plain JS (no p5)
+
+Call this once on startup:
+
+```js
+SensorPermissions.ensureSensorPermission({
+  buttonText: "Tap to enable sensors",
+});
+```
+
+On iOS, it will create a DOM button if needed and retry on tap.
+
+## API
+
+- `SensorPermissions.state` → `{ granted, status, lastResult }`
 - `SensorPermissions.needsSensorPermission()` → `boolean`
 - `SensorPermissions.requestSensorPermissionOnce()` → `Promise<{ granted, state, error? }>`
 - `SensorPermissions.ensureSensorPermission(options)` → `Promise<{ granted, state, error? }>`
-  - `options.buttonText` (string)
-  - `options.preferP5Button` (boolean, default `true`)
-  - `options.onChange(granted, result)` (callback)
+- `SensorPermissions.ensureSensorPermissionP5(options)` → p5 wrapper (updates `state`)
+- `SensorPermissions.renderStatusP5(options)` → optional p5 status drawing
 
-## Notes
+## Gotchas
 
-- On iOS, permissions only work after a **tap**; calling in `draw()` won’t help.
+- On iOS Safari, permission only works after a **tap** (user gesture).

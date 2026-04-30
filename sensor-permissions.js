@@ -3,6 +3,12 @@
 (function () {
   "use strict";
 
+  const state = {
+    granted: false,
+    status: "",
+    lastResult: null,
+  };
+
   function hasPermissionAPI(EventCtor) {
     return typeof EventCtor !== "undefined" && typeof EventCtor.requestPermission === "function";
   }
@@ -36,6 +42,15 @@
 
   function defaultDeniedMessage(result) {
     if (result.state === "denied") return "Sensor access denied in Safari";
+    return "Tap to allow sensor access";
+  }
+
+  function defaultStatusMessage(result) {
+    if (!result) return "Sensor permission needed";
+    if (result.state === "not_needed") return "";
+    if (result.state === "granted") return "";
+    if (result.state === "denied") return "Sensor access denied in Safari";
+    // "error" is typically "no user gesture yet" on iOS Safari.
     return "Tap to allow sensor access";
   }
 
@@ -113,11 +128,17 @@
     const onChange = typeof opts.onChange === "function" ? opts.onChange : null;
     const buttonText = typeof opts.buttonText === "string" ? opts.buttonText : "Tap to enable sensors";
     const preferP5Button = opts.preferP5Button !== false; // default true
+    const setState = opts.setState !== false; // default true
 
     let button = null;
 
     const tryRequest = async () => {
       const result = await requestSensorPermissionOnce();
+      if (setState) {
+        state.lastResult = result;
+        state.granted = !!result.granted;
+        state.status = defaultStatusMessage(result);
+      }
       if (onChange) onChange(!!result.granted, result);
       if (result.granted) removeExistingButton(button);
       return result;
@@ -137,10 +158,48 @@
     return first;
   }
 
+  /**
+   * p5-friendly wrapper with sensible defaults.
+   * - uses a p5 button if available
+   * - updates `SensorPermissions.state` automatically
+   */
+  async function ensureSensorPermissionP5(options) {
+    const opts = options || {};
+    return ensureSensorPermission({
+      buttonText: typeof opts.buttonText === "string" ? opts.buttonText : "Tap to allow access to sensors",
+      preferP5Button: true,
+      setState: true,
+      onChange: null,
+    });
+  }
+
+  /**
+   * Optional helper to draw the current status message in p5.
+   * Call it only when `SensorPermissions.state.granted === false`.
+   */
+  function renderStatusP5(opts) {
+    const o = opts || {};
+    const msg = typeof o.message === "string" ? o.message : state.status;
+    if (!msg) return;
+
+    const x = typeof o.x === "number" ? o.x : window.width / 2;
+    const y = typeof o.y === "number" ? o.y : window.height / 2 + 50;
+
+    window.push();
+    window.fill(40);
+    window.textAlign(window.CENTER, window.CENTER);
+    window.textSize(typeof o.textSize === "number" ? o.textSize : 18);
+    window.text(msg, x, y);
+    window.pop();
+  }
+
   window.SensorPermissions = {
+    state,
     needsSensorPermission,
     requestSensorPermissionOnce,
     ensureSensorPermission,
+    ensureSensorPermissionP5,
+    renderStatusP5,
   };
 })();
 

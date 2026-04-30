@@ -8,8 +8,6 @@ let brush;
 let brushes = [];
 let persistentLayer;
 let lockedBrushCount = 0;
-let permissionGranted = false;
-let sensorStatus = "";
 
 const warmLockPalette = [
   [255, 0, 0], // rosso acceso
@@ -218,21 +216,8 @@ function setup() {
   };
 
   // Sensor permissions (required on iOS Safari, gesture-gated)
-  SensorPermissions.ensureSensorPermission({
+  SensorPermissions.ensureSensorPermissionP5({
     buttonText: "Tap to allow access to sensors",
-    preferP5Button: true,
-    onChange: (granted, result) => {
-      permissionGranted = granted;
-      if (granted) {
-        sensorStatus = "";
-        return;
-      }
-
-      // Keep the message short; the helper shows a button if needed.
-      if (result && result.state === "denied") sensorStatus = "Sensor access denied in Safari";
-      else if (result && result.state === "error") sensorStatus = "Tap to allow sensor access";
-      else sensorStatus = "Sensor permission needed";
-    },
   });
 }
 
@@ -250,13 +235,8 @@ function draw() {
     brushes[i].draw();
   }
 
-  if (!permissionGranted) {
-    if (sensorStatus) {
-      fill(40);
-      textAlign(CENTER, CENTER);
-      textSize(18);
-      text(sensorStatus, width / 2, height / 2 + 50);
-    }
+  if (!SensorPermissions.state.granted) {
+    SensorPermissions.renderStatusP5();
     Engine.update(engine);
     return;
   }
